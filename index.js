@@ -7,8 +7,14 @@ import chalk from 'chalk';
 import fs from 'fs/promises';
 import path from 'path';
 import { OpenAI } from 'openai';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const program = new Command();
+const execAsync = promisify(exec);
+
+// Constants
+const MAX_CHUNK_SIZE = 4000; // OpenAI TTS limit is 4096 characters
 
 // Supported file formats and their MIME types
 const SUPPORTED_FORMATS = {
@@ -208,30 +214,151 @@ async function getTextContent(config) {
   }
 }
 
+function chunkText(text) {
+  if (text.length <= MAX_CHUNK_SIZE) {
+    return [text];
+  }
+
+  const chunks = [];
+  let currentChunk = '';
+  
+  // Split by sentences first
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  
+  for (const sentence of sentences) {
+    // If a single sentence is too long, split by words
+    if (sentence.length > MAX_CHUNK_SIZE) {
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+      
+      const words = sentence.split(' ');
+      let wordChunk = '';
+      
+      for (const word of words) {
+        if ((wordChunk + ' ' + word).length > MAX_CHUNK_SIZE) {
+          if (wordChunk) {
+            chunks.push(wordChunk.trim());
+            wordChunk = word;
+          } else {
+            // Single word is too long, force split
+            chunks.push(word.substring(0, MAX_CHUNK_SIZE));
+            wordChunk = word.substring(MAX_CHUNK_SIZE);
+          }
+        } else {
+          wordChunk = wordChunk ? wordChunk + ' ' + word : word;
+        }
+      }
+      
+      if (wordChunk) {
+        currentChunk = wordChunk;
+      }
+    } else {
+      // Check if adding this sentence would exceed the limit
+      if ((currentChunk + ' ' + sentence).length > MAX_CHUNK_SIZE) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+        }
+        currentChunk = sentence;
+      } else {
+        currentChunk = currentChunk ? currentChunk + ' ' + sentence : sentence;
+      }
+    }
+  }
+  
+  if (currentChunk) {
+    chunks.push(currentChunk.trim());
+  }
+  
+  return chunks.filter(chunk => chunk.length > 0);
+}
+
+async function convertSingleChunk(openai, config, text, chunkIndex) {
+  const response = await openai.audio.speech.create({
+    model: 'tts-1',
+    voice: config.voice,
+    input: text,
+    response_format: config.audioFormat,
+  });
+
+  const tempPath = `${config.output}_chunk_${chunkIndex}.${config.audioFormat}`;
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await fs.writeFile(tempPath, buffer);
+  
+  return tempPath;
+}
+
+async function mergeAudioFiles(chunkPaths, outputPath, audioFormat) {
+  // Create a list file for ffmpeg
+  const listContent = chunkPaths.map(path => `file '${path}'`).join('\n');
+  const listPath = 'chunks_list.txt';
+  await fs.writeFile(listPath, listContent);
+
+  try {
+    // Use ffmpeg to concatenate audio files
+    const ffmpegCmd = `ffmpeg -f concat -safe 0 -i "${listPath}" -c copy "${outputPath}" -y`;
+    await execAsync(ffmpegCmd);
+    
+    // Clean up temporary files
+    await fs.unlink(listPath);
+    for (const chunkPath of chunkPaths) {
+      await fs.unlink(chunkPath);
+    }
+  } catch (error) {
+    // If ffmpeg fails, try a simpler approach or throw error with helpful message
+    throw new Error('Failed to merge audio files. Please ensure ffmpeg is installed on your system.');
+  }
+}
+
 async function convertTextToSpeech(config, text) {
-  const spinner = ora('Converting text to speech...').start();
+  const spinner = ora('Analyzing text...').start();
   
   try {
     const openai = new OpenAI({
       apiKey: config.apiKey,
     });
 
-    // Update spinner with progress
-    spinner.text = 'Sending request to OpenAI...';
-
-    const response = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: config.voice,
-      input: text,
-      response_format: config.audioFormat,
-    });
-
-    spinner.text = 'Saving audio file...';
-
+    // Check if text needs chunking
+    const chunks = chunkText(text);
     const outputPath = `${config.output}.${config.audioFormat}`;
-    const buffer = Buffer.from(await response.arrayBuffer());
     
-    await fs.writeFile(outputPath, buffer);
+    if (chunks.length === 1) {
+      // Single chunk processing (original logic)
+      spinner.text = 'Converting text to speech...';
+      
+      const response = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: config.voice,
+        input: text,
+        response_format: config.audioFormat,
+      });
+
+      spinner.text = 'Saving audio file...';
+      const buffer = Buffer.from(await response.arrayBuffer());
+      await fs.writeFile(outputPath, buffer);
+    } else {
+      // Multi-chunk processing
+      spinner.text = `Processing ${chunks.length} chunks...`;
+      console.log(chalk.yellow(`\nText is ${text.length} characters long, splitting into ${chunks.length} chunks.`));
+      
+      const chunkPaths = [];
+      
+      for (let i = 0; i < chunks.length; i++) {
+        spinner.text = `Converting chunk ${i + 1}/${chunks.length}...`;
+        
+        const chunkPath = await convertSingleChunk(openai, config, chunks[i], i + 1);
+        chunkPaths.push(chunkPath);
+        
+        // Small delay to avoid rate limiting
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      spinner.text = 'Merging audio files...';
+      await mergeAudioFiles(chunkPaths, outputPath, config.audioFormat);
+    }
 
     spinner.succeed(`Audio saved to: ${chalk.cyan(outputPath)}`);
     
@@ -240,6 +367,9 @@ async function convertTextToSpeech(config, text) {
     console.log(chalk.gray(`File size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`));
     console.log(chalk.gray(`Voice: ${config.voice}`));
     console.log(chalk.gray(`Format: ${config.audioFormat}`));
+    if (chunks.length > 1) {
+      console.log(chalk.gray(`Chunks processed: ${chunks.length}`));
+    }
     
   } catch (error) {
     spinner.fail('Conversion failed');
@@ -250,6 +380,8 @@ async function convertTextToSpeech(config, text) {
       throw new Error('OpenAI API quota exceeded');
     } else if (error.message.includes('rate limit')) {
       throw new Error('OpenAI API rate limit exceeded. Please try again later.');
+    } else if (error.message.includes('ffmpeg')) {
+      throw error; // Re-throw ffmpeg errors as-is
     } else {
       throw new Error(`OpenAI API error: ${error.message}`);
     }

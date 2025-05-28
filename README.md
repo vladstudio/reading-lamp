@@ -106,3 +106,17 @@ The utility provides clear error messages for common issues:
 
 - Node.js 16+
 - OpenAI API key with TTS access
+- FFmpeg (required for processing long texts that need chunking)
+
+## Long Text Handling
+
+For texts longer than 4,096 characters, the tool automatically:
+- Splits text into chunks at sentence boundaries
+- Processes each chunk separately
+- Merges the resulting audio files using FFmpeg
+- Provides progress updates during processing
+
+Install FFmpeg:
+- **macOS**: `brew install ffmpeg`
+- **Ubuntu/Debian**: `sudo apt update && sudo apt install ffmpeg`
+- **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
