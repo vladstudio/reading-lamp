@@ -274,19 +274,39 @@ function chunkText(text) {
   return chunks.filter(chunk => chunk.length > 0);
 }
 
-async function convertSingleChunk(openai, config, text, chunkIndex) {
-  const response = await openai.audio.speech.create({
-    model: 'tts-1',
-    voice: config.voice,
-    input: text,
-    response_format: config.audioFormat,
-  });
-
-  const tempPath = `${config.output}_chunk_${chunkIndex}.${config.audioFormat}`;
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await fs.writeFile(tempPath, buffer);
+async function convertSingleChunk(openai, config, text, chunkIndex, maxRetries = 3) {
+  // Show chunk info
+  const truncatedText = text.length > 50 
+    ? `${text.substring(0, 20)}...${text.substring(text.length - 20)}`
+    : text;
+  console.log(chalk.gray(`Chunk ${chunkIndex}: "${truncatedText}" (${text.length} chars)`));
   
-  return tempPath;
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: config.voice,
+        input: text,
+        response_format: config.audioFormat,
+      });
+
+      const tempPath = `${config.output}_chunk_${chunkIndex}.${config.audioFormat}`;
+      const buffer = Buffer.from(await response.arrayBuffer());
+      await fs.writeFile(tempPath, buffer);
+      
+      return tempPath;
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries) {
+        console.log(chalk.yellow(`\n⚠️ Chunk ${chunkIndex} failed (attempt ${attempt}/${maxRetries}), retrying...`));
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+  }
+  
+  throw lastError;
 }
 
 async function mergeAudioFiles(chunkPaths, outputPath, audioFormat) {
@@ -352,7 +372,7 @@ async function convertTextToSpeech(config, text) {
         
         // Small delay to avoid rate limiting
         if (i < chunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
       
