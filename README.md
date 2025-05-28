@@ -13,7 +13,7 @@ npm install
 ### Basic Usage
 
 ```bash
-node .
+node reading-lamp
 ```
 
 This will start the interactive mode where you'll be prompted for all required parameters.
@@ -21,7 +21,7 @@ This will start the interactive mode where you'll be prompted for all required p
 ### Command Line Arguments
 
 ```bash
-node . --api-key "your-openai-key" --text "Hello world" --voice alloy --audio-format mp3 --output hello
+node reading-lamp --api-key "your-openai-key" --text "Hello world" --voice alloy --audio-format mp3 --output hello
 ```
 
 ### Available Options
@@ -46,19 +46,19 @@ You can also set these environment variables:
 
 #### Convert text directly:
 ```bash
-node . --text "Welcome to Reading Lamp!" --voice nova --audio-format mp3
+node reading-lamp --text "Welcome to Reading Lamp!" --voice nova --audio-format mp3
 ```
 
 #### Convert from file:
 ```bash
-node . --file story.txt --voice fable --audio-format wav --output story
+node reading-lamp --file story.txt --voice fable --audio-format wav --output story
 ```
 
 #### Using environment variables:
 ```bash
 export OPENAI_API_KEY="your-api-key"
 export READING_LAMP_VOICE="alloy"
-node . --text "Hello world"
+node reading-lamp --text "Hello world"
 ```
 
 ## Supported File Formats
