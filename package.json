@@ -1,0 +1,29 @@
+{
+  "name": "reading-lamp",
+  "version": "1.0.0",
+  "description": "A command-line utility to convert text to speech using OpenAI's API",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "reading-lamp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "text-to-speech",
+    "openai",
+    "cli",
+    "audio"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.12",
+    "ora": "^7.0.1",
+    "chalk": "^5.3.0",
+    "openai": "^4.20.1"
+  }
+}
