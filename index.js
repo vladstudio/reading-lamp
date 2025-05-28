@@ -279,7 +279,7 @@ async function convertSingleChunk(openai, config, text, chunkIndex, maxRetries =
   const truncatedText = text.length > 50 
     ? `${text.substring(0, 20)}...${text.substring(text.length - 20)}`
     : text;
-  console.log(chalk.gray(`Chunk ${chunkIndex}: "${truncatedText}" (${text.length} chars)`));
+  console.log(chalk.gray(`\nChunk ${chunkIndex}: "${truncatedText}" (${text.length} chars)`));
   
   let lastError;
   
