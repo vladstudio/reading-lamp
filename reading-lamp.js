@@ -16,6 +16,13 @@ const execAsync = promisify(exec);
 // Constants
 const MAX_CHUNK_SIZE = 4000; // OpenAI TTS limit is 4096 characters
 
+// TTS Pricing (from https://platform.openai.com/docs/pricing as of 2024)
+// Updated pricing: TTS: $15.00 per 1M characters, TTS HD: $30.00 per 1M characters
+const TTS_PRICING = {
+  'tts-1': 15.00 / 1000000,      // $15.00 per 1M characters = $0.000015 per character
+  'tts-1-hd': 30.00 / 1000000   // $30.00 per 1M characters = $0.000030 per character
+};
+
 // Supported file formats and their MIME types
 const SUPPORTED_FORMATS = {
   '.txt': 'text/plain',
@@ -63,9 +70,18 @@ async function main() {
     const text = await getTextContent(config);
 
     // Convert text to speech
-    await convertTextToSpeech(config, text);
+    const usage = await convertTextToSpeech(config, text);
 
     console.log(chalk.green.bold('✅ Conversion completed successfully!'));
+    
+    // Display API usage
+    if (usage) {
+      console.log(chalk.cyan('\n📊 API Usage:'));
+      console.log(chalk.gray(`Model used: ${usage.model}`));
+      console.log(chalk.gray(`Characters processed: ${usage.totalChars.toLocaleString()}`));
+      console.log(chalk.gray(`Rate: $${(usage.pricePerChar * 1000000).toFixed(2)} per 1M characters`));
+      console.log(chalk.gray(`Total cost: $${usage.estimatedCost.toFixed(4)}`));
+    }
   } catch (error) {
     console.error(chalk.red.bold('❌ Error:'), error.message);
     process.exit(1);
@@ -343,6 +359,9 @@ async function convertTextToSpeech(config, text) {
     const chunks = chunkText(text);
     const outputPath = `${config.output}.${config.audioFormat}`;
     
+    // Initialize usage tracking
+    let totalChars = 0;
+    
     if (chunks.length === 1) {
       // Single chunk processing (original logic)
       spinner.text = 'Converting text to speech...';
@@ -357,6 +376,8 @@ async function convertTextToSpeech(config, text) {
       spinner.text = 'Saving audio file...';
       const buffer = Buffer.from(await response.arrayBuffer());
       await fs.writeFile(outputPath, buffer);
+      
+      totalChars = text.length;
     } else {
       // Multi-chunk processing
       spinner.text = `Processing ${chunks.length} chunks...`;
@@ -369,6 +390,7 @@ async function convertTextToSpeech(config, text) {
         
         const chunkPath = await convertSingleChunk(openai, config, chunks[i], i + 1);
         chunkPaths.push(chunkPath);
+        totalChars += chunks[i].length;
         
         // Small delay to avoid rate limiting
         if (i < chunks.length - 1) {
@@ -390,6 +412,16 @@ async function convertTextToSpeech(config, text) {
     if (chunks.length > 1) {
       console.log(chalk.gray(`Chunks processed: ${chunks.length}`));
     }
+    
+    // Calculate and return usage information
+    const modelUsed = 'tts-1'; // Currently only using tts-1 model
+    const estimatedCost = totalChars * TTS_PRICING[modelUsed];
+    return {
+      totalChars,
+      estimatedCost,
+      model: modelUsed,
+      pricePerChar: TTS_PRICING[modelUsed]
+    };
     
   } catch (error) {
     spinner.fail('Conversion failed');
